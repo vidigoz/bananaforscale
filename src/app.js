@@ -1,138 +1,92 @@
 /**
  * Banana for Scale — app.js
- * Maneja upload, preview, llamada a Claude Vision API, y render de resultados.
- *
- * IMPORTANTE: Este app requiere una API key de Anthropic.
- * La key se guarda SOLO en localStorage del navegador del usuario.
- * Nunca se envía a ningún servidor propio.
  */
 
-// ─── Config ───────────────────────────────────────────────────────────────────
 const API_URL = "https://api.anthropic.com/v1/messages";
-const MODEL   = "claude-opus-4-5"; // Cambia a claude-sonnet-4-20250514 para menor costo
+const MODEL   = "claude-sonnet-4-20250514";
 
-// ─── Estado ───────────────────────────────────────────────────────────────────
-let imageBase64   = null;
+let imageBase64    = null;
 let imageMediaType = "image/jpeg";
 
-// ─── DOM refs ─────────────────────────────────────────────────────────────────
-const dropZone    = document.getElementById("drop-zone");
-const fileInput   = document.getElementById("file-input");
-
-// ─── Init ─────────────────────────────────────────────────────────────────────
-document.addEventListener("DOMContentLoaded", () => {
+// ─── Arranque ────────────────────────────────────────────────────────────────
+window.addEventListener("load", () => {
   setupDropZone();
   setupFileInput();
-  checkApiKey();
+
+  if (!getApiKey()) {
+    showApiKeyScreen();
+  } else {
+    showUploadScreen();
+  }
 });
 
-// ─── API Key management ───────────────────────────────────────────────────────
-function checkApiKey() {
-  // La key puede venir de: localStorage, o variable de entorno vía build tool.
-  // Si no hay key, inyectamos un banner para pedírsela al usuario.
-  const key = getApiKey();
-  if (!key) {
-    injectApiKeyBanner();
-  }
-}
-
+// ─── API Key ─────────────────────────────────────────────────────────────────
 function getApiKey() {
-  // En producción: usar variable de entorno (Netlify/Vercel/CF Pages).
-  // En desarrollo local: usar localStorage como fallback.
-  return (
-    window.__ANTHROPIC_KEY__ || // inyectada en build
-    localStorage.getItem("bfs_api_key") ||
-    null
-  );
+  return localStorage.getItem("bfs_api_key") || null;
 }
 
-function injectApiKeyBanner() {
-  const banner = document.createElement("div");
-  banner.id = "api-key-banner";
-  banner.style.cssText = `
-    background: rgba(245,216,64,0.08);
-    border: 1px solid rgba(245,216,64,0.25);
-    border-radius: 12px;
-    padding: 16px 20px;
-    margin-bottom: 1rem;
-    font-size: 14px;
-  `;
-  banner.innerHTML = `
-    <p style="font-weight:600; margin-bottom:8px; color:#f5d840;">🔑 Configura tu API Key de Anthropic</p>
-    <p style="color:#8a8270; margin-bottom:12px; font-size:13px;">
-      Necesitas una clave de <a href="https://console.anthropic.com" target="_blank" style="color:#f5d840;">console.anthropic.com</a>.
-      Se guarda solo en tu navegador, nunca en ningún servidor.
-    </p>
-    <div style="display:flex; gap:8px;">
-      <input
-        type="password"
-        id="api-key-input"
-        placeholder="sk-ant-..."
-        style="flex:1; background:#1a1814; border:1px solid rgba(255,255,255,0.14); border-radius:8px;
-               padding:9px 14px; color:#f0ece3; font-size:14px; outline:none;"
-      />
-      <button onclick="saveApiKey()" style="
-        background:#f5d840; color:#0f0e0c; border:none; border-radius:8px;
-        padding:9px 18px; font-weight:700; cursor:pointer; font-size:14px;
-      ">Guardar</button>
-    </div>
-  `;
-  const appCard = document.querySelector(".app-card");
-  appCard.prepend(banner);
+function showApiKeyScreen() {
+  document.getElementById("app-main").style.display    = "none";
+  document.getElementById("apikey-screen").style.display = "flex";
+}
+
+function showUploadScreen() {
+  document.getElementById("apikey-screen").style.display = "none";
+  document.getElementById("app-main").style.display    = "block";
+  setState("upload");
 }
 
 window.saveApiKey = function () {
-  const input = document.getElementById("api-key-input");
-  const key = input?.value?.trim();
-  if (!key || !key.startsWith("sk-ant-")) {
-    alert("La key debe empezar con sk-ant-");
-    return;
-  }
+  const input = document.getElementById("apikey-input");
+  const key   = (input?.value || "").trim();
+  if (!key) { setApiKeyError("Pega tu API key aquí."); return; }
+  if (!key.startsWith("sk-ant-")) { setApiKeyError("La key debe empezar con sk-ant-…  Cópiala desde console.anthropic.com"); return; }
   localStorage.setItem("bfs_api_key", key);
-  document.getElementById("api-key-banner")?.remove();
+  showUploadScreen();
 };
 
-// ─── Drag & Drop ──────────────────────────────────────────────────────────────
+window.clearApiKey = function () {
+  localStorage.removeItem("bfs_api_key");
+  document.getElementById("apikey-input").value = "";
+  showApiKeyScreen();
+};
+
+function setApiKeyError(msg) {
+  const el = document.getElementById("apikey-error");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+// ─── Drag & Drop ─────────────────────────────────────────────────────────────
 function setupDropZone() {
-  dropZone.addEventListener("dragover", (e) => {
+  const dz = document.getElementById("drop-zone");
+  if (!dz) return;
+  dz.addEventListener("dragover",  e => { e.preventDefault(); dz.classList.add("dragging"); });
+  dz.addEventListener("dragleave", ()  => dz.classList.remove("dragging"));
+  dz.addEventListener("drop", e => {
     e.preventDefault();
-    dropZone.classList.add("dragging");
-  });
-  dropZone.addEventListener("dragleave", () => {
-    dropZone.classList.remove("dragging");
-  });
-  dropZone.addEventListener("drop", (e) => {
-    e.preventDefault();
-    dropZone.classList.remove("dragging");
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
+    dz.classList.remove("dragging");
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
   });
 }
 
 function setupFileInput() {
-  fileInput.addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (file) handleFile(file);
+  const fi = document.getElementById("file-input");
+  if (!fi) return;
+  fi.addEventListener("change", e => {
+    const f = e.target.files[0];
+    if (f) handleFile(f);
   });
 }
 
-// ─── File handling ────────────────────────────────────────────────────────────
 function handleFile(file) {
-  if (!file.type.startsWith("image/")) {
-    showError("Por favor sube un archivo de imagen (JPG, PNG, HEIC, WEBP).");
-    return;
-  }
-
-  imageMediaType = file.type === "image/jpeg" ? "image/jpeg"
-                 : file.type === "image/png"  ? "image/png"
-                 : file.type === "image/webp" ? "image/webp"
-                 : "image/jpeg";
-
+  if (!file.type.startsWith("image/")) { showError("Sube un archivo de imagen (JPG, PNG, HEIC, WEBP)."); return; }
+  imageMediaType = ["image/jpeg","image/png","image/webp","image/gif"].includes(file.type) ? file.type : "image/jpeg";
   const reader = new FileReader();
-  reader.onload = (e) => {
+  reader.onload = e => {
     imageBase64 = e.target.result.split(",")[1];
-    const img = document.getElementById("preview-img");
-    img.src = e.target.result;
+    document.getElementById("preview-img").src = e.target.result;
     setState("preview");
     hideError();
   };
@@ -141,83 +95,63 @@ function handleFile(file) {
 
 // ─── State machine ────────────────────────────────────────────────────────────
 function setState(state) {
-  const states = ["upload", "preview", "loading", "result"];
-  states.forEach((s) => {
-    document.getElementById(`state-${s}`).classList.toggle("hidden", s !== state);
+  ["upload","preview","loading","result"].forEach(s => {
+    const el = document.getElementById("state-" + s);
+    if (el) el.classList.toggle("hidden", s !== state);
   });
 }
 
-// ─── Analysis ─────────────────────────────────────────────────────────────────
+// ─── Análisis ────────────────────────────────────────────────────────────────
 window.analyzeImage = async function () {
   const apiKey = getApiKey();
-  if (!apiKey) {
-    showError("Necesitas configurar tu API key de Anthropic primero.");
-    injectApiKeyBanner();
-    return;
-  }
+  if (!apiKey) { showApiKeyScreen(); return; }
   if (!imageBase64) return;
 
   setState("loading");
   hideError();
-  startLoadingMessages();
+
+  const msgs = ["Identificando alimentos…","Buscando banana para calibrar escala…","Estimando porciones…","Calculando macros…"];
+  let mi = 0;
+  const msgEl = document.getElementById("loading-msg");
+  if (msgEl) msgEl.textContent = msgs[0];
+  const interval = setInterval(() => { mi = (mi+1)%msgs.length; if(msgEl) msgEl.textContent = msgs[mi]; }, 2000);
 
   try {
-    const response = await callClaudeVision(apiKey, imageBase64, imageMediaType);
-    const result = parseResult(response);
+    const raw    = await callClaude(apiKey);
+    const result = parseJSON(raw);
     renderResult(result);
     setState("result");
   } catch (err) {
-    console.error("Error en análisis:", err);
+    console.error(err);
     setState("preview");
-    showError(
-      err.message.includes("401")
-        ? "API key inválida o sin permisos. Verifica en console.anthropic.com."
-        : err.message.includes("529") || err.message.includes("overloaded")
-        ? "La API está ocupada. Espera unos segundos e intenta de nuevo."
-        : `Error al analizar: ${err.message}`
-    );
+    if (err.message.includes("401") || err.message.includes("403")) {
+      showError("API key inválida. Revísala en console.anthropic.com.");
+      localStorage.removeItem("bfs_api_key");
+    } else {
+      showError("Error al analizar: " + err.message);
+    }
+  } finally {
+    clearInterval(interval);
   }
 };
 
-async function callClaudeVision(apiKey, base64, mediaType) {
-  const prompt = `Eres un nutricionista experto y analista de alimentos con visión por computadora.
+async function callClaude(apiKey) {
+  const prompt = `Eres un nutricionista experto. Analiza esta imagen de comida.
 
-Analiza esta imagen de comida con precisión.
+Si hay una banana: úsala como referencia de escala (~18 cm, ~120 g sin cáscara).
+Si no: estima por contexto (plato estándar ~26 cm, cubiertos, etc.).
 
-DETECCIÓN DE ESCALA:
-- Busca si hay una banana en la imagen
-- Si la encuentras: úsala como referencia (banana estándar = ~18cm largo, ~120g sin cáscara)
-- Calcula la razón píxeles/cm y estima el tamaño real de cada alimento
-- Si no hay banana: estima las porciones por contexto visual (plato estándar ~26cm, cubiertos, etc.)
-
-ANÁLISIS REQUERIDO:
-- Identifica CADA alimento visible en el plato
-- Estima su peso en gramos
-- Calcula calorías y macros para esa porción específica
-
-Responde ÚNICAMENTE con JSON válido, sin markdown, sin texto adicional, sin explicaciones fuera del JSON:
+Responde ÚNICAMENTE con JSON válido, sin backticks, sin texto extra:
 
 {
-  "banana_detected": true o false,
-  "banana_note": "descripción de si encontraste la banana y cómo la usaste como escala (1-2 oraciones)",
+  "banana_detected": true,
+  "banana_note": "breve nota en español",
   "foods": [
-    {
-      "name": "nombre del alimento en español",
-      "estimated_weight_g": número entero,
-      "calories": número entero,
-      "protein_g": número con 1 decimal,
-      "carbs_g": número con 1 decimal,
-      "fat_g": número con 1 decimal
-    }
+    { "name": "nombre en español", "estimated_weight_g": 150, "calories": 200, "protein_g": 10.0, "carbs_g": 25.0, "fat_g": 5.0 }
   ],
-  "totals": {
-    "calories": número entero,
-    "protein_g": número con 1 decimal,
-    "carbs_g": número con 1 decimal,
-    "fat_g": número con 1 decimal
-  },
-  "confidence": número entero entre 0 y 100,
-  "confidence_reason": "razón principal de la confianza o incertidumbre (1 oración)"
+  "totals": { "calories": 200, "protein_g": 10.0, "carbs_g": 25.0, "fat_g": 5.0 },
+  "confidence": 75,
+  "confidence_reason": "razón breve"
 }`;
 
   const res = await fetch(API_URL, {
@@ -231,141 +165,84 @@ Responde ÚNICAMENTE con JSON válido, sin markdown, sin texto adicional, sin ex
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 1024,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: { type: "base64", media_type: mediaType, data: base64 },
-            },
-            { type: "text", text: prompt },
-          ],
-        },
-      ],
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: imageMediaType, data: imageBase64 } },
+          { type: "text",  text: prompt },
+        ],
+      }],
     }),
   });
 
   if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(
-      errData?.error?.message || `HTTP ${res.status}`
-    );
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${res.status}`);
   }
-
   const data = await res.json();
-  return data;
+  return data.content.map(b => b.type === "text" ? b.text : "").join("");
 }
 
-function parseResult(data) {
-  const text = data.content
-    .map((block) => (block.type === "text" ? block.text : ""))
-    .join("");
-
-  // Limpiar posibles backticks de markdown
-  const clean = text.replace(/```json\s*/gi, "").replace(/```/g, "").trim();
-
-  try {
-    return JSON.parse(clean);
-  } catch (e) {
-    // Intentar extraer JSON con regex como fallback
-    const match = clean.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
-    throw new Error("No se pudo parsear la respuesta de IA.");
+function parseJSON(text) {
+  const clean = text.replace(/```json\s*/gi,"").replace(/```/g,"").trim();
+  try { return JSON.parse(clean); }
+  catch {
+    const m = clean.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+    throw new Error("No se pudo parsear la respuesta de la IA.");
   }
 }
 
-// ─── Render resultados ────────────────────────────────────────────────────────
+// ─── Render ───────────────────────────────────────────────────────────────────
 function renderResult(r) {
-  // Totales
   document.getElementById("r-cal").textContent  = Math.round(r.totals.calories);
-  document.getElementById("r-pro").textContent  = r.totals.protein_g.toFixed(1);
-  document.getElementById("r-carb").textContent = r.totals.carbs_g.toFixed(1);
-  document.getElementById("r-fat").textContent  = r.totals.fat_g.toFixed(1);
+  document.getElementById("r-pro").textContent  = (+r.totals.protein_g).toFixed(1);
+  document.getElementById("r-carb").textContent = (+r.totals.carbs_g).toFixed(1);
+  document.getElementById("r-fat").textContent  = (+r.totals.fat_g).toFixed(1);
 
-  // Subtitle
-  document.getElementById("result-subtitle").textContent =
-    r.banana_detected
-      ? "🍌 Banana detectada — escala usada para mayor precisión"
-      : "⚠️ Sin banana — estimación visual estándar";
+  document.getElementById("result-subtitle").textContent = r.banana_detected
+    ? "🍌 Banana detectada — escala usada para mayor precisión"
+    : "⚠️ Sin banana — estimación visual estándar";
 
-  // Lista de alimentos
   const list = document.getElementById("food-list");
   list.innerHTML = "";
-  r.foods.forEach((food) => {
+  (r.foods || []).forEach(food => {
     const row = document.createElement("div");
     row.className = "food-row";
     row.innerHTML = `
-      <span>
-        <span class="food-name">${escapeHtml(food.name)}</span>
-        <span class="food-weight">~${Math.round(food.estimated_weight_g)}g</span>
-      </span>
-      <span class="food-cal">${Math.round(food.calories)} kcal</span>
-    `;
+      <span><span class="food-name">${esc(food.name)}</span><span class="food-weight">~${Math.round(food.estimated_weight_g)}g</span></span>
+      <span class="food-cal">${Math.round(food.calories)} kcal</span>`;
     list.appendChild(row);
   });
 
-  // Confianza
-  const conf = Math.round(r.confidence);
-  document.getElementById("confidence-pct").textContent = `${conf}%`;
+  const conf = Math.round(r.confidence || 0);
+  document.getElementById("confidence-pct").textContent = conf + "%";
   const fill = document.getElementById("confidence-fill");
-  fill.style.width = `${conf}%`;
-  fill.style.background =
-    conf >= 70 ? "#7ecb72"
-    : conf >= 45 ? "#f5d840"
-    : "#e05c5c";
-
+  fill.style.width = conf + "%";
+  fill.style.background = conf >= 70 ? "#7ecb72" : conf >= 45 ? "#f5d840" : "#e05c5c";
   document.getElementById("confidence-note").textContent =
-    (r.banana_detected
-      ? "🍌 Banana usada como referencia de escala. "
-      : "⚠️ Sin banana: pon una junto al plato para mayor precisión. ") +
-    (r.confidence_reason || "");
+    (r.banana_detected ? "🍌 Banana usada como referencia. " : "⚠️ Sin banana: ponla junto al plato. ")
+    + (r.confidence_reason || "");
 }
 
 // ─── Reset ────────────────────────────────────────────────────────────────────
 window.resetApp = function () {
   imageBase64 = null;
-  fileInput.value = "";
+  const fi = document.getElementById("file-input");
+  if (fi) fi.value = "";
   setState("upload");
   hideError();
 };
 
-// ─── Loading messages ─────────────────────────────────────────────────────────
-let loadingInterval = null;
-const LOADING_MSGS = [
-  "Identificando alimentos…",
-  "Buscando banana para calibrar escala…",
-  "Estimando porciones y peso…",
-  "Calculando calorías y macros…",
-  "Consultando base de datos nutricional…",
-];
-
-function startLoadingMessages() {
-  let i = 0;
-  const el = document.getElementById("loading-msg");
-  if (el) el.textContent = LOADING_MSGS[0];
-  loadingInterval = setInterval(() => {
-    i = (i + 1) % LOADING_MSGS.length;
-    if (el) el.textContent = LOADING_MSGS[i];
-  }, 2000);
-  return () => clearInterval(loadingInterval);
-}
-
-// ─── Error handling ───────────────────────────────────────────────────────────
-function showError(msg) {
-  const box = document.getElementById("error-box");
-  box.textContent = `⚠️ ${msg}`;
-  box.classList.remove("hidden");
-}
-
-function hideError() {
-  document.getElementById("error-box").classList.add("hidden");
-}
-
 // ─── Utils ────────────────────────────────────────────────────────────────────
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+function showError(msg) {
+  const b = document.getElementById("error-box");
+  if (b) { b.textContent = "⚠️ " + msg; b.classList.remove("hidden"); }
+}
+function hideError() {
+  const b = document.getElementById("error-box");
+  if (b) b.classList.add("hidden");
+}
+function esc(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }

@@ -1,17 +1,237 @@
 <!DOCTYPE html>
 <html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍌</text></svg>" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Estima calorías y macros de tu comida usando una banana como escala de referencia" />
-    <title>Banana for Scale 🍌</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet">
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🍌 Banana for Scale — Analiza tu comida</title>
+  <meta name="description" content="Pon una banana junto a tu comida, toma la foto, y obtén calorías y macros estimados con IA." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍌</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="src/style.css" />
+</head>
+<body>
+
+  <div class="noise"></div>
+
+  <!-- ═══════════════════════════════════════════════════
+       PANTALLA 1: Configuración de API Key
+       Visible por defecto si no hay key guardada.
+       JS la oculta cuando existe key en localStorage.
+  ════════════════════════════════════════════════════ -->
+  <div id="apikey-screen" style="display:flex; min-height:100vh; align-items:center; justify-content:center; padding:2rem;">
+    <div style="max-width:460px; width:100%;">
+
+      <div style="text-align:center; margin-bottom:2rem;">
+        <div style="font-size:52px; margin-bottom:1rem;">🍌</div>
+        <h1 style="font-family:'Syne',sans-serif; font-size:1.8rem; font-weight:800; letter-spacing:-0.03em; margin-bottom:8px;">
+          Banana <em style="font-style:normal; color:#f5d840;">for Scale</em>
+        </h1>
+        <p style="color:#8a8270; font-size:14px;">El meme clásico, ahora cuenta calorías con IA.</p>
+      </div>
+
+      <div style="background:#1a1814; border:1px solid rgba(255,255,255,0.12); border-radius:16px; padding:2rem;">
+        <p style="font-weight:600; margin-bottom:6px; color:#f5d840; font-size:15px;">🔑 Tu API Key de Anthropic</p>
+        <p style="color:#8a8270; font-size:13px; margin-bottom:1.25rem; line-height:1.6;">
+          Necesitas una clave de
+          <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:#f5d840;">console.anthropic.com</a>.
+          <br>Se guarda <strong style="color:#f0ece3;">solo en tu navegador</strong> — nunca sale de aquí.
+        </p>
+
+        <div style="display:flex; gap:8px; margin-bottom:10px;">
+          <input
+            type="password"
+            id="apikey-input"
+            placeholder="sk-ant-api03-..."
+            autocomplete="off"
+            style="flex:1; background:#0f0e0c; border:1px solid rgba(255,255,255,0.16); border-radius:8px;
+                   padding:10px 14px; color:#f0ece3; font-size:14px; outline:none; font-family:'DM Sans',sans-serif;"
+            onkeydown="if(event.key==='Enter') saveApiKey()"
+          />
+          <button onclick="saveApiKey()" style="
+            background:#f5d840; color:#0f0e0c; border:none; border-radius:8px;
+            padding:10px 20px; font-family:'Syne',sans-serif; font-weight:700;
+            font-size:14px; cursor:pointer; white-space:nowrap; letter-spacing:-0.01em;
+          ">Guardar →</button>
+        </div>
+
+        <p id="apikey-error" style="display:none; color:#e05c5c; font-size:13px; margin-top:6px;"></p>
+
+        <div style="border-top:1px solid rgba(255,255,255,0.08); margin-top:1.25rem; padding-top:1.25rem;">
+          <p style="font-size:12px; color:#4a4638; line-height:1.6;">
+            <strong style="color:#8a8270;">¿Cómo obtener la key?</strong><br>
+            1. Ve a <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:#f5d840;">console.anthropic.com/settings/keys</a><br>
+            2. Crea una cuenta (hay créditos de prueba gratuitos)<br>
+            3. Clic en "Create Key" → copia la key → pégala aquí
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       PANTALLA 2: App principal
+       Oculta por defecto, JS la muestra cuando hay key.
+  ════════════════════════════════════════════════════ -->
+  <div id="app-main" style="display:none;">
+
+    <header>
+      <div class="header-inner">
+        <div class="logo">
+          <span class="logo-icon">🍌</span>
+          <span class="logo-text">banana<em>forscale</em></span>
+        </div>
+        <nav>
+          <a href="#how">Cómo funciona</a>
+          <button onclick="clearApiKey()" style="background:transparent; border:1px solid rgba(255,255,255,0.14); color:#8a8270; border-radius:6px; padding:5px 12px; font-size:13px; cursor:pointer;">Cambiar key</button>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <!-- Hero -->
+      <section class="hero">
+        <div class="hero-label">Meme → Herramienta real</div>
+        <h1>El meme clásico,<br /><em>ahora cuenta calorías.</em></h1>
+        <p class="hero-sub">Pon una banana junto a tu comida. La IA usa su tamaño como referencia para estimar porciones, calorías y macros.</p>
+        <div class="hero-steps">
+          <div class="step"><span class="step-n">1</span><span>Pon banana en el plato</span></div>
+          <div class="step-arrow">→</div>
+          <div class="step"><span class="step-n">2</span><span>Toma la foto</span></div>
+          <div class="step-arrow">→</div>
+          <div class="step"><span class="step-n">3</span><span>Obtén tus macros</span></div>
+        </div>
+      </section>
+
+      <!-- App Card -->
+      <section class="app-section" id="app">
+        <div class="app-card">
+
+          <!-- State: Upload -->
+          <div id="state-upload">
+            <div class="drop-zone" id="drop-zone">
+              <input type="file" id="file-input" accept="image/*" />
+              <div class="drop-icon">📷</div>
+              <p class="drop-title">Sube tu foto aquí</p>
+              <p class="drop-sub">Arrastra o haz clic · JPG, PNG, HEIC, WEBP</p>
+              <button class="btn-primary" onclick="document.getElementById('file-input').click(); event.stopPropagation()">Elegir foto</button>
+            </div>
+            <div class="banana-tip">
+              <span class="tip-icon">🍌</span>
+              <span>Tip: pon la banana en el mismo plano que la comida para mayor precisión.</span>
+            </div>
+          </div>
+
+          <!-- State: Preview -->
+          <div id="state-preview" class="hidden">
+            <div class="preview-wrap">
+              <img id="preview-img" alt="Tu comida" />
+              <div class="preview-badge">🍌 lista para analizar</div>
+            </div>
+            <div class="preview-actions">
+              <button class="btn-primary" onclick="analyzeImage()">Analizar con IA ↗</button>
+              <button class="btn-ghost" onclick="resetApp()">Cambiar foto</button>
+            </div>
+          </div>
+
+          <!-- State: Loading -->
+          <div id="state-loading" class="hidden">
+            <div class="loading-inner">
+              <div class="banana-spin">🍌</div>
+              <p class="loading-msg" id="loading-msg">Identificando alimentos…</p>
+              <div class="loading-bar"><div class="loading-fill"></div></div>
+            </div>
+          </div>
+
+          <!-- State: Result -->
+          <div id="state-result" class="hidden">
+            <div class="result-header">
+              <div>
+                <h2 class="result-title">Análisis completo</h2>
+                <p class="result-subtitle" id="result-subtitle">—</p>
+              </div>
+              <button class="btn-ghost small" onclick="resetApp()">Nueva foto</button>
+            </div>
+
+            <div class="macros-grid">
+              <div class="macro-card cal">
+                <span class="macro-label">Calorías</span>
+                <span class="macro-val" id="r-cal">—</span>
+                <span class="macro-unit">kcal</span>
+              </div>
+              <div class="macro-card">
+                <span class="macro-label">Proteína</span>
+                <span class="macro-val" id="r-pro">—</span>
+                <span class="macro-unit">g</span>
+              </div>
+              <div class="macro-card">
+                <span class="macro-label">Carbos</span>
+                <span class="macro-val" id="r-carb">—</span>
+                <span class="macro-unit">g</span>
+              </div>
+              <div class="macro-card">
+                <span class="macro-label">Grasa</span>
+                <span class="macro-val" id="r-fat">—</span>
+                <span class="macro-unit">g</span>
+              </div>
+            </div>
+
+            <div class="foods-section">
+              <span class="section-label">Alimentos detectados</span>
+              <div id="food-list"></div>
+            </div>
+
+            <div class="confidence-section">
+              <div class="confidence-row">
+                <span class="section-label">Confianza del análisis</span>
+                <span class="confidence-pct" id="confidence-pct">—</span>
+              </div>
+              <div class="confidence-track">
+                <div class="confidence-fill" id="confidence-fill"></div>
+              </div>
+              <p class="confidence-note" id="confidence-note"></p>
+            </div>
+
+            <div class="disclaimer">
+              ⚠️ Los valores son estimaciones. No reemplaza asesoría nutricional profesional.
+            </div>
+          </div>
+
+          <!-- Error box (siempre al final, oculto por defecto) -->
+          <div id="error-box" class="error-box hidden"></div>
+
+        </div>
+      </section>
+
+      <!-- How it works -->
+      <section class="how-section" id="how">
+        <h2 class="section-title">¿Cómo funciona?</h2>
+        <div class="how-grid">
+          <div class="how-card">
+            <div class="how-icon">📐</div>
+            <h3>Referencia de escala</h3>
+            <p>Una banana estándar mide ~18 cm. La IA la detecta y calcula una razón píxeles/cm para estimar el tamaño real de cada alimento.</p>
+          </div>
+          <div class="how-card">
+            <div class="how-icon">🧠</div>
+            <h3>Visión con IA</h3>
+            <p>Usamos Claude Vision para identificar cada alimento, estimar su peso según la banana, y calcular calorías y macros.</p>
+          </div>
+          <div class="how-card">
+            <div class="how-icon">🔒</div>
+            <h3>Privacidad primero</h3>
+            <p>Las fotos van directo a Anthropic para análisis. Tu API key se guarda solo en tu navegador — nunca en un servidor propio.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Hecho con 🍌 y Claude Vision · <a href="https://github.com/TU_USUARIO/banana-for-scale" target="_blank">Código abierto en GitHub</a></p>
+    </footer>
+
+  </div><!-- /app-main -->
+
+  <script src="src/app.js"></script>
+</body>
 </html>
